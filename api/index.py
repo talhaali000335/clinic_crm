@@ -99,14 +99,24 @@ def deid(t, name):  # the model never needs the patient's name or contact detail
     return mask(t)
 
 # ---------- 4b. EMAIL (real SMTP; works with Gmail app passwords or any SMTP provider) ----------
-def email_ready(): return bool(os.environ.get("SMTP_USER") and os.environ.get("SMTP_PASS"))
+def brevo_ready(): return bool(os.environ.get("BREVO_API_KEY") and os.environ.get("BREVO_SENDER"))
+def smtp_ready(): return bool(os.environ.get("SMTP_USER") and os.environ.get("SMTP_PASS"))
+def email_ready(): return brevo_ready() or smtp_ready()
 def send_email(to, subject, body):
-    if not email_ready(): raise HTTPException(503, "Email is not set up. Add SMTP_USER and SMTP_PASS (see README).")
+    if not email_ready(): raise HTTPException(503, "Email is not set up. Add BREVO_API_KEY and BREVO_SENDER (or SMTP_USER and SMTP_PASS). See README.")
     override = os.environ.get("EMAIL_OVERRIDE_TO", "").strip()  # test mode: every email goes to this address instead of the patient
     if override: subject, to = f"[TEST for {to}] {subject}", override
+    text = body + f"\n\n--\n{CLINIC}\nSent by clinic staff. If you were not expecting this email, please ignore it."
+    if brevo_ready():  # sends over HTTPS, so mail-port blocks and Gmail login blocks do not matter
+        try:
+            r = httpx.post("https://api.brevo.com/v3/smtp/email", timeout=20, headers={"api-key": os.environ["BREVO_API_KEY"], "accept": "application/json"},
+                           json={"sender": {"name": CLINIC, "email": os.environ["BREVO_SENDER"]}, "to": [{"email": to}], "subject": subject, "textContent": text})
+        except Exception as e:
+            raise HTTPException(502, f"Email could not be sent: {type(e).__name__}: {str(e)[:150]}")
+        if r.status_code >= 300: raise HTTPException(502, f"Email could not be sent: Brevo {r.status_code}: {r.text[:200]}")
+        return to
     msg = EmailMessage()
-    msg["From"] = os.environ.get("SMTP_FROM") or os.environ["SMTP_USER"]; msg["To"] = to; msg["Subject"] = subject
-    msg.set_content(body + f"\n\n--\n{CLINIC}\nSent by clinic staff. If you were not expecting this email, please ignore it.")
+    msg["From"] = os.environ.get("SMTP_FROM") or os.environ["SMTP_USER"]; msg["To"] = to; msg["Subject"] = subject; msg.set_content(text)
     port = int(os.environ.get("SMTP_PORT", "587"))
     try:
         with (smtplib.SMTP_SSL if port == 465 else smtplib.SMTP)(os.environ.get("SMTP_HOST", "smtp.gmail.com"), port, timeout=20) as srv:
@@ -347,7 +357,7 @@ def check():  # prints what the program can see. It never prints secret values.
         head = ENV_PATH.read_bytes()[:3]
         print("file encoding:", "UTF-16 <-- FIX: re-save as UTF-8 in Notepad (Save As, Encoding: UTF-8)" if head[:2] in (b"\xff\xfe", b"\xfe\xff") else "UTF-8 ok")
         print("names written in the file:", [l.split("=")[0].strip() for l in ENV_PATH.read_text(encoding="utf-8-sig", errors="replace").splitlines() if "=" in l and not l.lstrip().startswith("#")] if head[:2] not in (b"\xff\xfe", b"\xfe\xff") else "unreadable")
-    for k in ("GROQ_API_KEY", "MONGODB_URI", "APP_SECRET", "SMTP_USER", "SMTP_PASS"):
+    for k in ("GROQ_API_KEY", "MONGODB_URI", "APP_SECRET", "BREVO_API_KEY", "BREVO_SENDER", "SMTP_USER", "SMTP_PASS"):
         print(f"{k:14}", "set" if os.environ.get(k) else "MISSING", "(APP_SECRET needs 16+ characters)" if k == "APP_SECRET" and os.environ.get(k) and len(os.environ[k]) < 16 else "")
     if os.environ.get("MONGODB_URI"):
         try: MongoClient(os.environ["MONGODB_URI"], serverSelectionTimeoutMS=6000).admin.command("ping"); print("MongoDB connection: OK")
