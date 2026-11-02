@@ -176,7 +176,6 @@ function Approvals() {
     <>
       <h2>Approvals</h2><p className="sub">AI drafts wait here. A real email is sent only when a person clicks Approve. You can edit the subject and text first.</p>
       {cfg && !cfg.email_ready && <div className="alert">Email is not set up on the server yet. Add SMTP_USER and SMTP_PASS (see the README). Approving will fail until then.</div>}
-      {cfg?.override && <div className="alert">Test mode: every email is delivered to {cfg.override} instead of the patient.</div>}
       <Err e={e} />{ok && <p style={{ color: "var(--ok)" }}>{ok}</p>}
       {rows.map((m) => <div key={m.id} className="card"><b>{m.patient}</b> <span className="tag">{m.purpose}</span> <span className="tag">{m.lang}</span><div className="sub" style={{ margin: "4px 0 8px" }}>To: {m.to}</div>
         <input className="full" value={ed[m.id]?.subject ?? ""} onChange={(x) => set(m.id, "subject", x.target.value)} aria-label={"Subject for " + m.patient} />
